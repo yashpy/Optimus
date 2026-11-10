@@ -242,14 +242,18 @@ function MissionHistory({ baseUrl, refreshKey }: { baseUrl: string; refreshKey: 
       {error && <Text style={styles.error}>Could not load history: {error}</Text>}
       {summary ? (
         <Text>
-          {summary.tasksFinished} tasks finished · {summary.estops} e-stops · {summary.byLevel.warn} warnings ·{' '}
-          {summary.total} events
+          {plural(summary.tasksFinished, 'task')} finished · {plural(summary.estops, 'e-stop')} ·{' '}
+          {plural(summary.byLevel.warn, 'warning')} · {plural(summary.total, 'event')}
         </Text>
       ) : (
         !error && <Text style={styles.muted}>Loading…</Text>
       )}
     </View>
   );
+}
+
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
 function canPause(mode: RobotMode | null): boolean {
