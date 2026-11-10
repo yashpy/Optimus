@@ -10,6 +10,15 @@ SERVICE="${SERVICE:-mission-log}"
 SECRET="${SECRET:-mission-log-ingest-key}"
 
 gcloud config set project "$PROJECT_ID"
+
+# Fail fast with a clear message: Cloud Run needs a project linked to an OPEN billing account.
+if [ "$(gcloud billing projects describe "$PROJECT_ID" --format='value(billingEnabled)')" != "True" ]; then
+  echo "ERROR: billing is not enabled for $PROJECT_ID." >&2
+  echo "Open or create a billing account at https://console.cloud.google.com/billing/manage, then run:" >&2
+  echo "  gcloud billing projects link $PROJECT_ID --billing-account=<OPEN_ACCOUNT_ID>" >&2
+  exit 1
+fi
+
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com secretmanager.googleapis.com artifactregistry.googleapis.com
 
 # Keep the ingest API key in Secret Manager, not in code or env files.
