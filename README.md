@@ -1,6 +1,11 @@
 # Optimus Companion
 
-A React Native (Expo, TypeScript) app for directing and monitoring a humanoid-style robot, plus a Node.js robot simulator to drive it. Runs on iOS, Android, and web.
+A React Native (Expo, TypeScript) app for directing and monitoring a humanoid-style robot, a Node.js robot simulator to drive it, and a Python **Flask** "Mission Log" API that stores robot events and is set up to deploy on **Google Cloud Run (GCP)**. The app runs on iOS, Android, and web.
+
+```
+React Native app ──WebSocket──▶ Robot simulator ──HTTP batches──▶ Flask Mission Log API (SQLite)
+        └───────────────── GET summary / history ◀───────────────────────┘
+```
 
 ![Working](docs/working.png)
 
@@ -43,6 +48,28 @@ simulator/               Node.js robot simulator
 - `SIM_DROP_RATE=0.05` randomly drops connections.
 - `SIM_ACK_DELAY_MS=4000` delays acks past the client timeout.
 
+## Mission Log API (Flask, `backend/`)
+
+| Method | Path | Notes |
+|---|---|---|
+| `POST` | `/api/robots/<id>/events` | Requires `X-API-Key`. Body `{"events": [{level, message, ts}]}`, max 100 events. A batch with any invalid event is rejected whole (400). |
+| `GET` | `/api/robots/<id>/events?limit=&level=&before=` | Newest first. Keyset pagination on `(ts, id)` via `next_before`, so pages stay stable while new events arrive. |
+| `GET` | `/api/robots/<id>/summary` | Totals by level, tasks finished, e-stops, last event time. |
+| `GET` | `/healthz` | Health check. |
+
+- **Security:** the API key is compared in constant time (`hmac.compare_digest`). On Cloud Run it comes from Secret Manager. Robot ids are restricted to `[A-Za-z0-9_-]{1,64}` and all SQL is parameterized.
+- **Simulator forwarding:** `MissionLogForwarder` batches events every 2 s. If the API is down, events stay buffered (capped at 1,000) and are retried. A batch the API rejects as malformed is dropped so it can't block newer events.
+- **App:** set `EXPO_PUBLIC_MISSION_LOG_URL` and the app shows a "Mission history" card.
+
+**Deploy to Google Cloud Run:**
+
+```bash
+cd backend
+PROJECT_ID=your-gcp-project ./deploy-cloud-run.sh
+```
+
+The script enables the needed APIs, creates the ingest key in Secret Manager, builds the container with Cloud Build, and deploys it. The demo stores data in SQLite on the container's disk, which Cloud Run does not persist across instances or restarts. That's why the script pins `--max-instances 1`. For durable storage, swap SQLite for Cloud SQL (Postgres).
+
 ## Run it
 
 Requires Node 22.18+ (runs TypeScript directly).
@@ -57,11 +84,23 @@ cd app && npm install && npx expo start
 
 Open the app in Expo Go on your phone (or press `w` for web). On a phone, set the address to your computer's LAN IP, e.g. `ws://192.168.1.20:8080`.
 
+To include the Mission Log locally:
+
+```bash
+cd backend && pip install -r requirements.txt
+INGEST_API_KEY=dev-key gunicorn --bind :5000 wsgi:app
+# simulator
+MISSION_LOG_URL=http://localhost:5000 INGEST_API_KEY=dev-key npm start
+# app
+EXPO_PUBLIC_MISSION_LOG_URL=http://localhost:5000 npx expo start
+```
+
 ## Tests
 
 ```bash
-cd app && npm test && npm run typecheck          # 15 tests: reducer, backoff, parsing, RobotClient with fake timers
-cd simulator && npm test && npm run typecheck    # 9 tests: robot state machine, input validation, end-to-end
+cd app && npm test && npm run typecheck          # 17 tests: reducer, backoff, parsing, RobotClient, Mission Log client
+cd simulator && npm test && npm run typecheck    # 13 tests: robot state machine, validation, forwarder, end-to-end
+cd backend && pip install -r requirements-dev.txt && pytest   # 21 tests: auth, validation, pagination, summary
 ```
 
 ## Screenshots

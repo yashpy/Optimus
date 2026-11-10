@@ -3,3 +3,6 @@ dist/
 .expo/
 *.tsbuildinfo
 .DS_Store
+__pycache__/
+.pytest_cache/
+*.db

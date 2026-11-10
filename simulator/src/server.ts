@@ -1,5 +1,6 @@
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { ClientMessage, Command, ServerMessage } from '../../app/src/protocol.ts';
+import { MissionLogForwarder } from './missionLog.ts';
 import { SimRobot } from './robot.ts';
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -82,6 +83,18 @@ function main(): void {
     ws.on('close', () => console.log('client disconnected'));
   });
 
+  // Optional: forward robot events to the Mission Log API (Flask backend).
+  const logUrl = process.env.MISSION_LOG_URL;
+  const logKey = process.env.INGEST_API_KEY;
+  const forwarder =
+    logUrl && logKey
+      ? new MissionLogForwarder({ baseUrl: logUrl, robotId: process.env.ROBOT_ID ?? 'sim-1', apiKey: logKey })
+      : null;
+  if (forwarder) {
+    setInterval(() => void forwarder.flush(), 2000);
+    console.log(`Forwarding events to ${logUrl}`);
+  }
+
   let last = Date.now();
   setInterval(() => {
     const now = Date.now();
@@ -90,6 +103,7 @@ function main(): void {
     for (const e of robot.drainEvents()) {
       console.log(`[${e.level}] ${e.message}`);
       broadcast({ type: 'event', level: e.level, message: e.message, ts: now });
+      forwarder?.add({ level: e.level, message: e.message, ts: now });
     }
     broadcast({ type: 'telemetry', seq: seq++, ts: now, state: robot.snapshot() });
   }, 1000 / TICK_HZ);

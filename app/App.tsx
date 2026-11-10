@@ -1,5 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import type { Command, RobotMode, TaskKind } from './src/protocol.ts';
+import { fetchSummary, type MissionSummary } from './src/missionLogApi.ts';
 import { newCommandId } from './src/RobotClient.ts';
 import { isStale, type CommandRecord, type ConnectionStatus } from './src/store.ts';
 import { useNow, useRobot } from './src/useRobot.ts';
@@ -181,6 +182,8 @@ function RobotScreen() {
           </View>
         )}
 
+        {MISSION_LOG_URL && <MissionHistory baseUrl={MISSION_LOG_URL} refreshKey={state.log.length} />}
+
         {state.commandOrder.length > 0 && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>Commands</Text>
@@ -205,6 +208,47 @@ function RobotScreen() {
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+// Set EXPO_PUBLIC_MISSION_LOG_URL (e.g. your Cloud Run URL) to show stored history from the Flask API.
+const MISSION_LOG_URL = process.env.EXPO_PUBLIC_MISSION_LOG_URL;
+const ROBOT_ID = process.env.EXPO_PUBLIC_ROBOT_ID ?? 'sim-1';
+
+/** Shows totals from the Mission Log API. Refetches when new robot events arrive, at most every 3 s. */
+function MissionHistory({ baseUrl, refreshKey }: { baseUrl: string; refreshKey: number }) {
+  const [summary, setSummary] = useState<MissionSummary | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const lastFetch = useRef(0);
+
+  useEffect(() => {
+    const wait = Math.max(0, 3000 - (Date.now() - lastFetch.current));
+    let cancelled = false;
+    const t = setTimeout(() => {
+      lastFetch.current = Date.now();
+      fetchSummary(baseUrl, ROBOT_ID)
+        .then((s) => !cancelled && (setSummary(s), setError(null)))
+        .catch((e: unknown) => !cancelled && setError(String(e instanceof Error ? e.message : e)));
+    }, wait);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [baseUrl, refreshKey]);
+
+  return (
+    <View style={styles.card}>
+      <Text style={styles.cardTitle}>Mission history</Text>
+      {error && <Text style={styles.error}>Could not load history: {error}</Text>}
+      {summary ? (
+        <Text>
+          {summary.tasksFinished} tasks finished · {summary.estops} e-stops · {summary.byLevel.warn} warnings ·{' '}
+          {summary.total} events
+        </Text>
+      ) : (
+        !error && <Text style={styles.muted}>Loading…</Text>
+      )}
+    </View>
   );
 }
 
